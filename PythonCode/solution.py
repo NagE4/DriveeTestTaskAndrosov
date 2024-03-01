@@ -1,73 +1,112 @@
 from openpyxl import load_workbook
 from openpyxl import Workbook
 import math
+import random
+
+# блок кода генерации случайных данных для задачи
+# так как изначально было два кода, оставлю в неизмененном виде
+# чтобы был понятен процесс работы
+workbook = Workbook()
+sheet = workbook.active
+
+# 1 и 2 столбцы это координаты старта, 3 и 4 - конца, 5 - стоимость заказа
+# 6 и 7 - координаты курьеров
+# сто заказов, 20 курьеров
+for i in range(1, 101):
+    for j in range(1, 6):
+        sheet.cell(row = i, column = j).value = round(random.uniform(0.00, 11000.00), 4)
+
+# так как площадь г. Якутска 122 квадратных км, за пример был взят квадрат со сторонами 11 км
+
+for i in range(1, 21):
+    for j in range(6, 8):
+        sheet.cell(row = i, column = j).value = round(random.uniform(0.00, 11000.00), 4)
+
+workbook.save(filename="Coordinates.xlsx")
+
+# блок кода с решением с заданными случайным образом данными
 
 workbook = load_workbook(filename="Coordinates.xlsx")
 sheet = workbook.active
 
 # функция расстояния между двумя точками на плоскости
-def dist(x1, y1, x2, y2):
-    return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+def dist(point1, point2):
+    return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
 
+# функция нахождения расстояния до каждого заказа от каждого другого заказа и каждого курьера (с учетом расстояния доставки)
+def couriers_to_orders(couriers, orders):
+    distance = {}
+    for order in orders:
+        distance[order['id']] = {}
+        for order2 in orders:
+            # так как мы учитываем расстояние доставки заказа, у нас получается подобие ориентированного графа
+            if order['id'] != order2['id']:
+                distance[order['id']][order2['id']] = dist(order['start'], order2['end']) + dist(order['start'], order['end'])
+    for courier in couriers:
+        for order in orders:
+            distance[order['id']][courier] = dist(couriers[courier], order['start']) + dist(order['start'], order['end'])
+    return distance
 
-deliver = []
-cost = []
-cour = []
+"""
+основная функция для динамического решения
+сначала я сделал решение многократным перебором 
+где минимальное расстояние от курьера до точки запписывалось и цикл продолжался
+потом я спросил у ChatGPT какой есть алгоритм для решения данной задачи
+он выдал алгоритм Дейкстры, но в решении его даже не использовал
+изучив другие алгоритмы на графы
+я пришел к выводу, что тут нужно решать динамически, 
+так как курьеры постоянно меняют свои координаты на конечные координаты заказа
+с помощью функции couriers_to_orders программе не надо каждый раз рассчитывать расстояние между точками
+а лишь обновлять координаты курьера и путь, который он прошел
+а пройденный заказ просто удаляется
+и функция повторяется, пока не кончатся невыполненные заказы
+"""
+
+def distribute(distance, distributed_orders):
+    min_val = float('inf')
+    min_from = ''
+    min_to = -1
+    for i in distance:
+        for j in distance[i].keys():
+            if isinstance(j, str):
+                if min_val > distance[i][j]:
+                    min_from = j
+                    min_to = i
+                    min_val = distance[i][j]
+                    break
+    distance.pop(min_to)
+    for i in distance:
+        del distance[i][min_to]
+        distance[i][min_from] += min_val
+    distributed_orders[min_from].append(min_to)
+    if distance:
+        distribute(distance, distributed_orders)
+    else:
+        return
+
+#чтение из таблицы, сгенерированной ранее
+
 n = 0
 m = 0
 r = 0
-minimal = [100000.0, -1, -1]
-test = 0
-
-#чтение из таблицы, сгенерированной ранее рандомно
+orders = []
+couriers = {}
 
 for row in sheet.iter_rows(values_only=True):
     m += 1
-    deliver.append([row[0], row[1], row[2], row[3]])
-    cost.append(row[4])
+    orders.append({'id': m, 'start': [row[0], row[1]], 'end': [row[2], row[3]], 'cost': row[4]})
     if row[5]:
-        cour.append([row[5], row[6], 16000.0])
         n += 1
-count = m
-ans = [[] for i in range(n)]
+        couriers['courier'+ str(n)] = [row[5], row[6]]
 
-# основной цикл
-# находит минимальную сумму (расстояние от курьера до старта + длина доставки)
-# так как неоходимо за минимальное время отвезти все посылки
-# у меня нет доказательства, что такая логика верна, но при взятом примере с маленькими переменными она сработала
-# в отличие от других способов
+distributed_orders = {}
+for i in couriers:
+    distributed_orders[i] = []
 
-while True:
-    if minimal[0] < 100000.0:
-        mindel = deliver[minimal[2]]
-        cour[minimal[1]] = [mindel[2], mindel[3], minimal[0]]
-        deliver[minimal[2]] = [-12000, -12000, -12000, -12000]
-        ans[minimal[1]].append(minimal[2] + 1)
-        if test < minimal[0]:
-            test = minimal[0]
-        minimal = [100000.0, -1, -1]
-        count -= 1
-    for i in range(n):
-        for j in range(m):
-            if any(k > 0 for k in deliver[j]):
-                r = dist(deliver[j][0], deliver[j][1], cour[i][0], cour[i][1])
-                r += dist(deliver[j][0], deliver[j][1], deliver[j][2], deliver[j][3]) + cour[i][2]
-            if minimal[0] > r:
-                minimal = [r, i, j]
-    if count <= 0:
-        break
+cours_to_ords = couriers_to_orders(couriers, orders)
+distribute(cours_to_ords, distributed_orders)
 
-# сохранение ответов (с суммой заказов каждого курьера) в новой таблице
-
-workbook = Workbook()
-sheet = workbook.active
-k = 0
-for i in ans:
-    summ = 0
-    k += 1
-    for j in i:
-        summ += cost[j-1]
-    sheet.append(i)
-    sheet["G"+str(k)] = str(summ)
-workbook.save('Answer.xlsx')
-
+# вывод ответов в консоль
+for i in distributed_orders:
+    print(i)
+    print(distributed_orders[i])
